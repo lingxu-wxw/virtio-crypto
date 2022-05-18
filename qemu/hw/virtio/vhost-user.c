@@ -32,6 +32,7 @@
 #include <sys/un.h>
 
 #include "standard-headers/linux/vhost_types.h"
+#include "standard-headers/linux/virtio_crypto.h"
 
 #ifdef CONFIG_LINUX
 #include <linux/userfaultfd.h>
@@ -178,6 +179,12 @@ typedef struct VhostUserCryptoSession {
     uint8_t auth_key[VHOST_CRYPTO_SYM_HMAC_MAX_KEY_LEN];
 } VhostUserCryptoSession;
 
+typedef struct VhostUserCryptoAsymSession {
+    /* session id for success, -1 on errors */
+    int64_t session_id;
+    CryptoDevBackendAsymSessionInfo session_setup_data;
+} VhostUserCryptoAsymSession;
+
 static VhostUserConfig c __attribute__ ((unused));
 #define VHOST_USER_CONFIG_HDR_SIZE (sizeof(c.offset) \
                                    + sizeof(c.size) \
@@ -218,6 +225,7 @@ typedef union {
         struct vhost_iotlb_msg iotlb;
         VhostUserConfig config;
         VhostUserCryptoSession session;
+        VhostUserCryptoAsymSession asym_session;
         VhostUserVringArea area;
         VhostUserInflight inflight;
 } VhostUserPayload;
@@ -2305,6 +2313,65 @@ static int vhost_user_set_config(struct vhost_dev *dev, const uint8_t *data,
     return 0;
 }
 
+static int vhost_user_crypto_create_asym_session(struct vhost_dev *dev,
+                                            void *session_info,
+                                            uint64_t *session_id)
+{
+    int ret;
+    bool crypto_session = virtio_has_feature(dev->protocol_features,
+                                       VHOST_USER_PROTOCOL_F_CRYPTO_SESSION);
+    CryptoDevBackendAsymSessionInfo *sess_info = session_info;
+    VhostUserMsg msg = {
+        .hdr.request = VHOST_USER_CREATE_CRYPTO_SESSION,
+        .hdr.flags = VHOST_USER_VERSION,
+        .hdr.size = sizeof(msg.payload.asym_session),
+    };
+
+    assert(dev->vhost_ops->backend_type == VHOST_BACKEND_TYPE_USER);
+
+    if (!crypto_session) {
+        error_report("vhost-user trying to send unhandled ioctl");
+        return -ENOTSUP;
+    }
+
+    memcpy(&msg.payload.asym_session.session_setup_data, sess_info,
+              sizeof(CryptoDevBackendAsymSessionInfo));
+  
+    ret = vhost_user_write(dev, &msg, NULL, 0);
+    if (ret < 0) {
+        error_report("vhost_user_write() return %d, create asym session failed",
+                     ret);
+        return ret;
+    }
+
+    ret = vhost_user_read(dev, &msg);
+    if (ret < 0) {
+        error_report("vhost_user_read() return %d, create asym session failed",
+                     ret);
+        return ret;
+    }
+
+    if (msg.hdr.request != VHOST_USER_CREATE_CRYPTO_SESSION) {
+        error_report("Received unexpected msg type. Expected %d received %d",
+                     VHOST_USER_CREATE_CRYPTO_SESSION, msg.hdr.request);
+        return -EPROTO;
+    }
+
+    if (msg.hdr.size != sizeof(msg.payload.asym_session)) {
+        error_report("Received bad msg size.");
+        return -EPROTO;
+    }
+
+    if (msg.payload.asym_session.session_id < 0) {
+        error_report("Bad session id: %" PRId64 "",
+                              msg.payload.asym_session.session_id);
+        return -EINVAL;
+    }
+    *session_id = msg.payload.asym_session.session_id;
+
+    return 0;
+}
+
 static int vhost_user_crypto_create_session(struct vhost_dev *dev,
                                             void *session_info,
                                             uint64_t *session_id)
@@ -2560,6 +2627,7 @@ const VhostOps user_ops = {
         .vhost_get_config = vhost_user_get_config,
         .vhost_set_config = vhost_user_set_config,
         .vhost_crypto_create_session = vhost_user_crypto_create_session,
+        .vhost_crypto_create_asym_session = vhost_user_crypto_create_asym_session,
         .vhost_crypto_close_session = vhost_user_crypto_close_session,
         .vhost_backend_mem_section_filter = vhost_user_mem_section_filter,
         .vhost_get_inflight_fd = vhost_user_get_inflight_fd,

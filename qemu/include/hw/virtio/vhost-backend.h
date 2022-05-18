@@ -103,6 +103,9 @@ typedef int (*vhost_get_config_op)(struct vhost_dev *dev, uint8_t *config,
 typedef int (*vhost_crypto_create_session_op)(struct vhost_dev *dev,
                                               void *session_info,
                                               uint64_t *session_id);
+typedef int (*vhost_crypto_create_asym_session_op)(struct vhost_dev *dev,
+                                              void *session_info,
+                                              uint64_t *session_id);
 typedef int (*vhost_crypto_close_session_op)(struct vhost_dev *dev,
                                              uint64_t session_id);
 
@@ -163,6 +166,7 @@ typedef struct VhostOps {
     vhost_get_config_op vhost_get_config;
     vhost_set_config_op vhost_set_config;
     vhost_crypto_create_session_op vhost_crypto_create_session;
+    vhost_crypto_create_asym_session_op vhost_crypto_create_asym_session;
     vhost_crypto_close_session_op vhost_crypto_close_session;
     vhost_backend_mem_section_filter_op vhost_backend_mem_section_filter;
     vhost_get_inflight_fd_op vhost_get_inflight_fd;

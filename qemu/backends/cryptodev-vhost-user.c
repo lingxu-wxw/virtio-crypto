@@ -233,7 +233,7 @@ static void cryptodev_vhost_user_init(
     backend->conf.max_auth_key_len = VHOST_USER_MAX_AUTH_KEY_LEN;
 }
 
-static int64_t cryptodev_vhost_user_sym_create_session(
+static int64_t cryptodev_vhost_user_create_sym_session(
            CryptoDevBackend *backend,
            CryptoDevBackendSymSessionInfo *sess_info,
            uint32_t queue_index, Error **errp)
@@ -259,6 +259,32 @@ static int64_t cryptodev_vhost_user_sym_create_session(
     return -1;
 }
 
+static int64_t cryptodev_vhost_user_create_asym_session(
+           CryptoDevBackend *backend,
+           CryptoDevBackendAsymSessionInfo *sess_info,
+           uint32_t queue_index, Error **errp)
+{
+    CryptoDevBackendClient *cc =
+                   backend->conf.peers.ccs[queue_index];
+    CryptoDevBackendVhost *vhost_crypto;
+    uint64_t session_id = 0;
+    int ret;
+
+    vhost_crypto = cryptodev_vhost_user_get_vhost(cc, backend, queue_index);
+    if (vhost_crypto) {
+        struct vhost_dev *dev = &(vhost_crypto->dev);
+        ret = dev->vhost_ops->vhost_crypto_create_asym_session(dev,
+                                                          sess_info,
+                                                          &session_id);
+        if (ret < 0) {
+            return -1;
+        } else {
+            return session_id;
+        }
+    }
+    return -1;
+}
+
 static int64_t cryptodev_vhost_user_create_session(
            CryptoDevBackend *backend,
            CryptoDevBackendSessionInfo *sess_info,
@@ -266,6 +292,7 @@ static int64_t cryptodev_vhost_user_create_session(
 {
     uint32_t op_code = sess_info->op_code;
     CryptoDevBackendSymSessionInfo *sym_sess_info;
+    CryptoDevBackendAsymSessionInfo *asym_sess_info;
 
     switch (op_code) {
     case VIRTIO_CRYPTO_CIPHER_CREATE_SESSION:
@@ -273,7 +300,11 @@ static int64_t cryptodev_vhost_user_create_session(
     case VIRTIO_CRYPTO_MAC_CREATE_SESSION:
     case VIRTIO_CRYPTO_AEAD_CREATE_SESSION:
         sym_sess_info = &sess_info->u.sym_sess_info;
-        return cryptodev_vhost_user_sym_create_session(backend, sym_sess_info,
+        return cryptodev_vhost_user_create_sym_session(backend, sym_sess_info,
+                   queue_index, errp);
+    case VIRTIO_CRYPTO_AKCIPHER_CREATE_SESSION:
+        asym_sess_info = &sess_info->u.asym_sess_info;
+        return cryptodev_vhost_user_create_asym_session(backend, asym_sess_info,
                    queue_index, errp);
     default:
         error_setg(errp, "Unsupported opcode :%" PRIu32 "",
